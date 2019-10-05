@@ -20,10 +20,10 @@ ReplaceSelection new_ReplaceSelction
 	return temp;
 }
 
-void fill_flags(bool flags[REP_SEL_BUFFER_LENGTH], bool value)
+void clear_flags(ReplaceSelection* self, bool value)
 {
 	for (int i = 0; i < REP_SEL_BUFFER_LENGTH; i++)
-		flags[i] = value;
+		self->frozen_flags[i] = self->written_flags[i] = value;
 }
 
 //동결되지 않은 정상값이 남아있는지 확인합니다.
@@ -47,6 +47,23 @@ int find_smallest_unfrozen_record(ReplaceSelection const* const self)
 		if (self->frozen_flags[i])
 			continue;
 		else
+		{
+			if (min_index == -1)
+				min_index = i;
+			else
+				if (self->record_buffer[min_index] > self->record_buffer[i])
+					min_index = i;
+		}
+
+	return min_index;
+}
+
+int find_smallest_frozen_record(ReplaceSelection const* const self)
+{
+	size_t min_index = -1;
+
+	for (int i = 0; i < REP_SEL_BUFFER_LENGTH; i++)
+		if (self->frozen_flags[i])
 		{
 			if (min_index == -1)
 				min_index = i;
@@ -93,6 +110,23 @@ void output_run(ReplaceSelection* self)
 	fclose(output_stream);
 }
 
+void output_buffer(ReplaceSelection* self)
+{
+	char run_filename[10];
+	sprintf(run_filename, "run%02d.txt", self->run_filename_index);
+	self->run_filename_index++;
+	FILE* output_stream = fopen(run_filename, "wt");
+
+	for (int i = 0; i < REP_SEL_BUFFER_LENGTH; i++)
+		if (self->written_flags[i])
+			continue;
+		else
+			fprintf(output_stream, "%d ", self->record_buffer[i]);
+
+	fflush(output_stream);
+	fclose(output_stream);
+}
+
 
 //메인 정렬 메서드.
 void __ReplacementSelction_sort(ReplaceSelection* self)
@@ -112,13 +146,13 @@ void __ReplacementSelction_sort(ReplaceSelection* self)
 		self->record_buffer[i] = read_one(self);
 	}
 
+	size_t run_index = 0;
 	while (is_not_eof(self))
 	{
 		for (int i = 0; i < REP_SEL_BUFFER_LENGTH; i++)
 			if (!self->written_flags[i])
 				self->frozen_flags[i] = false;
 
-		size_t run_index = 0;
 		while (has_unfrozen_record(self))
 		{
 			//최소값 인덱스 획득
@@ -126,11 +160,13 @@ void __ReplacementSelction_sort(ReplaceSelection* self)
 
 			//런에 추가
 			self->run[run_index] = self->record_buffer[smallest_unfrozen_index];
+			self->written_flags[smallest_unfrozen_index] = true;
 
 			//빈자리 채움
 			if (is_not_eof(self))
 			{
 				self->record_buffer[smallest_unfrozen_index] = read_one(self);
+				self->written_flags[smallest_unfrozen_index] = false;
 
 				//기존 런 뒷값보다 작으면 동결
 				if (self->record_buffer[smallest_unfrozen_index] < self->run[run_index])
@@ -138,12 +174,22 @@ void __ReplacementSelction_sort(ReplaceSelection* self)
 
 				run_index++;
 			}
+			else
+				self->frozen_flags[smallest_unfrozen_index] = true;
 
 			//런 꽉차면 파일로 저장
 			if (run_index == REP_SEL_RUN_LENGTH)
+			{
 				output_run(self);
+				run_index = 0;
+				break;
+			}
 		}
+
+		clear_flags(self, false);
 	}
+
+	output_buffer(self);
 
 	fclose(self->input_stream);
 }
